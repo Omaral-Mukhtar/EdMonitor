@@ -11,20 +11,36 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
+import { DistractionAlertBanner } from "@/components/room3d/DistractionAlertBanner";
+import { FocusStatusPill } from "@/components/room3d/FocusStatusPill";
 import { RoomHudDock } from "@/components/room3d/RoomHudDock";
 import { StudyRoomScene } from "@/components/room3d/StudyRoomScene";
+import {
+  LiveKitTableCall,
+  type LiveKitCallStatus,
+} from "@/components/table/LiveKitTableCall";
 import { StudyTimer } from "@/components/table/StudyTimer";
+import { TableChatSheet } from "@/components/table/TableChatSheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useFocusGuard } from "@/hooks/useFocusGuard";
 import { useRoomPresence } from "@/hooks/useRoomPresence";
+import { useSharedMedia } from "@/hooks/useSharedMedia";
+import { useTableBroadcast } from "@/hooks/useTableBroadcast";
 import { getCampusZoneById, type CampusRoomConfig } from "@/lib/campus-rooms";
 import {
   createInitialTimerState,
   getHaloFromTimerState,
+  pauseFocusDistraction,
   visualStateToTimerPhase,
   type StudyTimerState,
 } from "@/lib/study-timer";
-import { AVATAR_COLOR_PRESETS, type UserProfile } from "@/types/domain";
+import {
+  AVATAR_COLOR_PRESETS,
+  type DistractionReason,
+  type TimerSyncPayload,
+  type UserProfile,
+} from "@/types/domain";
 import { cn } from "cn";
 
 interface StudyRoomClientProps {
@@ -42,12 +58,32 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
     createInitialTimerState("pomodoro")
   );
   const [syncedWithTable, setSyncedWithTable] = useState(false);
+  const [distractionCount, setDistractionCount] = useState(0);
+  const [distractionBanner, setDistractionBanner] = useState<{
+    visible: boolean;
+    reason: DistractionReason | null;
+  }>({ visible: false, reason: null });
+
   const [toastDismissed, setToastDismissed] = useState(false);
   const [roomMenuOpen, setRoomMenuOpen] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
-  const htmlPortalRef = useRef<HTMLDivElement>(null);
 
+  // Topic A/V table call & chat state (strictly unused in General Study silent rooms)
+  const [isMicOn, setIsMicOn] = useState(false);
+  const [isCamOn, setIsCamOn] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [seenMessageCount, setSeenMessageCount] = useState(0);
+  const [callStatus, setCallStatus] = useState<LiveKitCallStatus>("idle");
+  const [callNote, setCallNote] = useState<string | null>(null);
+
+  const htmlPortalRef = useRef<HTMLDivElement>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
   const finishSessionHandlerRef = useRef<(() => Promise<void>) | null>(null);
+  const resumeTimerHandlerRef = useRef<(() => Promise<void>) | null>(null);
+  const timerSyncListenerRef = useRef<
+    ((payload: TimerSyncPayload) => void) | null
+  >(null);
+
   const registerFinishHandler = useCallback(
     (handler: (() => Promise<void>) | null) => {
       finishSessionHandlerRef.current = handler;
@@ -55,8 +91,81 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
     []
   );
 
-  const halo = getHaloFromTimerState(timerState.visualState);
+  const registerResumeHandler = useCallback(
+    (handler: (() => Promise<void>) | null) => {
+      resumeTimerHandlerRef.current = handler;
+    },
+    []
+  );
+
+  const registerTimerSyncListener = useCallback(
+    (listener: ((payload: TimerSyncPayload) => void) | null) => {
+      timerSyncListenerRef.current = listener;
+    },
+    []
+  );
+
+  const handleActiveSessionChange = useCallback((sessionId: string | null) => {
+    activeSessionIdRef.current = sessionId;
+  }, []);
+
+  const handleResetDistractionCount = useCallback(() => {
+    setDistractionCount(0);
+  }, []);
+
   const timerPhase = visualStateToTimerPhase(timerState.visualState);
+  const baseHalo = getHaloFromTimerState(timerState.visualState);
+
+  // Single shared webcam stream for CV Focus Guard + conditional LiveKit clone()
+  const {
+    cameraStatus,
+    errorMessage: cameraErrorMessage,
+    registerVideoElement,
+    getVideoElement,
+    requestCamera,
+    cloneVideoTrackForCall,
+    releaseClonedVideoTrack,
+    stopAllMedia,
+  } = useSharedMedia({
+    allowAudioVideo: room.allowAudioVideo,
+    autoStart: true,
+  });
+
+  const handleDistractionTriggered = useCallback(
+    (reason: DistractionReason, durationMs: number) => {
+      setTimerState((prev) => pauseFocusDistraction(prev));
+      setDistractionCount((prev) => prev + 1);
+      setDistractionBanner({ visible: true, reason });
+
+      const sessionId = activeSessionIdRef.current;
+      if (sessionId) {
+        void fetch(`/api/sessions/${sessionId}/distractions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reason,
+            durationMs,
+            triggeredAt: new Date().toISOString(),
+          }),
+        }).catch(() => undefined);
+      }
+    },
+    []
+  );
+
+  const focusGuard = useFocusGuard({
+    cameraStatus,
+    getVideoElement,
+    timerPhase,
+    enabled: !isLeaving,
+    onDistractionTriggered: handleDistractionTriggered,
+  });
+
+  const halo =
+    timerState.visualState === "paused_distraction" ||
+    (timerState.visualState === "idle" && focusGuard.isCvDistracted)
+      ? "red"
+      : baseHalo;
 
   const presence = useRoomPresence({
     roomSlug: room.slug,
@@ -70,21 +179,58 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
     halo,
   });
 
-  const effectiveSyncedWithTable =
-    Boolean(presence.selfState.tableId) && syncedWithTable;
+  const activeTableId = presence.selfState.tableId;
+  const effectiveSyncedWithTable = Boolean(activeTableId) && syncedWithTable;
+
+  // Consolidated single `table:{roomSlug}:{tableId}` channel for timer:sync + Topic chat:message
+  const tableBroadcast = useTableBroadcast({
+    roomSlug: room.slug,
+    tableId: activeTableId,
+    allowAudioVideo: room.allowAudioVideo,
+    enableTimerSync: effectiveSyncedWithTable,
+    userId: profile.id,
+    displayName: profile.displayName,
+    avatarColor,
+    onTimerSync: useCallback((payload: TimerSyncPayload) => {
+      timerSyncListenerRef.current?.(payload);
+    }, []),
+  });
+
+  const resetTableCallState = useCallback(() => {
+    setIsMicOn(false);
+    setIsCamOn(false);
+    setIsChatOpen(false);
+    setSeenMessageCount(0);
+    setCallStatus("idle");
+    setCallNote(null);
+    releaseClonedVideoTrack();
+  }, [releaseClonedVideoTrack]);
 
   const handleFloorWalk = useCallback(
     (point: [number, number, number]) => {
       setSyncedWithTable(false);
+      resetTableCallState();
       presence.walkTo(point);
     },
-    [presence]
+    [presence, resetTableCallState]
   );
 
   const handleStandUp = useCallback(() => {
     setSyncedWithTable(false);
+    resetTableCallState();
     presence.standUp();
-  }, [presence]);
+  }, [presence, resetTableCallState]);
+
+  const handleSelectSeat = useCallback(
+    (tableId: string, seatIndex: number) => {
+      if (activeTableId && activeTableId !== tableId) {
+        setSyncedWithTable(false);
+        resetTableCallState();
+      }
+      presence.sitAtSeat(tableId, seatIndex);
+    },
+    [activeTableId, presence, resetTableCallState]
+  );
 
   const handleSelectAvatarColor = async (color: string) => {
     setAvatarColor(color);
@@ -107,6 +253,7 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
       return;
     }
     setIsLeaving(true);
+    stopAllMedia();
     try {
       if (finishSessionHandlerRef.current) {
         await finishSessionHandlerRef.current();
@@ -118,7 +265,6 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
     }
   };
 
-  const activeTableId = presence.selfState.tableId;
   const seatedAtActiveTable = activeTableId
     ? presence.members.filter((m) => m.tableId === activeTableId).length
     : 0;
@@ -144,8 +290,32 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
         ? "Halo: Distracted"
         : "Halo: Break / Paused";
 
+  const unreadChatCount =
+    room.allowAudioVideo && activeTableId && !isChatOpen
+      ? Math.max(0, tableBroadcast.messages.length - seenMessageCount)
+      : 0;
+
+  const isTopicTableCallActive =
+    room.allowAudioVideo && Boolean(activeTableId) && !isLeaving;
+
+  const showDistractionBanner =
+    distractionBanner.visible && timerState.visualState === "paused_distraction";
+
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#EFEAE2]">
+      {/* Hidden <video> element fed by single shared base MediaStream for CV */}
+      <video
+        ref={registerVideoElement}
+        width={640}
+        height={480}
+        muted
+        playsInline
+        autoPlay
+        aria-hidden="true"
+        data-testid="cv-hidden-video"
+        className="pointer-events-none fixed right-0 bottom-0 -z-10 h-12 w-16 opacity-0"
+      />
+
       {/* Full-bleed Procedural R3F Room (unmounts cleanly before route transition) */}
       {!isLeaving ? (
         <StudyRoomScene
@@ -155,9 +325,7 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
           remoteMembers={presence.remoteMembers}
           htmlPortal={htmlPortalRef}
           onFloorClick={handleFloorWalk}
-          onSelectSeat={(tableId, seatIndex) => {
-            presence.sitAtSeat(tableId, seatIndex);
-          }}
+          onSelectSeat={handleSelectSeat}
         />
       ) : null}
 
@@ -169,7 +337,7 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
 
       {/* Non-blocking HUD Overlay Layer */}
       <div className="pointer-events-none fixed inset-0 z-20">
-        {/* Top-Left Compact Frosted Pill + Dropdown */}
+        {/* Top-Left Compact Frosted Pill + Dropdown + CV Status Pill */}
         <div className="pointer-events-none fixed top-4 left-4 z-20 flex flex-col items-start">
           <div className="pointer-events-auto flex h-11 items-center gap-2 rounded-full border border-slate-200/85 bg-white/88 px-3 text-slate-800 shadow-lg backdrop-blur-md">
             <Link
@@ -231,6 +399,22 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
             </Button>
           </div>
 
+          <FocusStatusPill
+            cvStatus={focusGuard.cvStatus}
+            halo={halo}
+            isBreakMode={timerState.visualState === "break"}
+            distractionReason={
+              distractionBanner.visible
+                ? distractionBanner.reason
+                : focusGuard.lastReason
+            }
+            cameraError={cameraErrorMessage}
+            cvError={focusGuard.cvErrorMessage}
+            onRetryCamera={() => {
+              void requestCamera();
+            }}
+          />
+
           {roomMenuOpen ? (
             <div
               data-testid="room-options-popover"
@@ -285,6 +469,21 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
           ) : null}
         </div>
 
+        {/* Top-Center Transient Distraction Alert Banner */}
+        <div className="pointer-events-none fixed top-4 left-1/2 z-30 -translate-x-1/2">
+          <DistractionAlertBanner
+            reason={distractionBanner.reason}
+            visible={showDistractionBanner}
+            onResumeFocus={() => {
+              setDistractionBanner({ visible: false, reason: null });
+              void resumeTimerHandlerRef.current?.();
+            }}
+            onDismiss={() =>
+              setDistractionBanner((prev) => ({ ...prev, visible: false }))
+            }
+          />
+        </div>
+
         {/* First-Visitor Empty Room Toast (cleanly above bottom dock) */}
         {showFirstVisitorToast ? (
           <div
@@ -308,26 +507,85 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
         ) : null}
 
         {/* Top-Right Minimal Timer Pill + Popover */}
-        <div className="pointer-events-none fixed top-4 right-4 z-20">
+        <div
+          className={cn(
+            "pointer-events-none fixed top-4 z-20 transition-all duration-200",
+            isTopicTableCallActive && isChatOpen ? "right-[21rem]" : "right-4"
+          )}
+        >
           <StudyTimer
             roomSlug={room.slug}
             subject={room.subject}
             userId={profile.id}
-            tableId={presence.selfState.tableId}
+            tableId={activeTableId}
             timerState={timerState}
             syncedWithTable={effectiveSyncedWithTable}
+            distractionCount={distractionCount}
+            onResetDistractionCount={handleResetDistractionCount}
+            onActiveSessionChange={handleActiveSessionChange}
+            onSendTimerSync={tableBroadcast.sendTimerSync}
+            registerTimerSyncListener={registerTimerSyncListener}
+            registerResumeHandler={registerResumeHandler}
             onStateChange={setTimerState}
             onSyncedWithTableChange={setSyncedWithTable}
             registerFinishHandler={registerFinishHandler}
           />
         </div>
 
+        {/* Topic A/V LiveKit Table Call + Slide-Over Chat Sheet (hidden in Silent rooms) */}
+        {isTopicTableCallActive && activeTableId ? (
+          <LiveKitTableCall
+            roomSlug={room.slug}
+            tableId={activeTableId}
+            allowAudioVideo={room.allowAudioVideo}
+            isMicOn={isMicOn}
+            isCamOn={isCamOn}
+            cloneVideoTrackForCall={cloneVideoTrackForCall}
+            releaseClonedVideoTrack={releaseClonedVideoTrack}
+            onStatusChange={(status, note) => {
+              setCallStatus(status);
+              setCallNote(note ?? null);
+            }}
+            onMicForceOff={() => setIsMicOn(false)}
+            onCamForceOff={() => setIsCamOn(false)}
+          >
+            {(videoStripSlot) => (
+              <TableChatSheet
+                open={isChatOpen}
+                tableId={activeTableId}
+                currentUserId={profile.id}
+                messages={tableBroadcast.messages}
+                callStatus={callStatus}
+                callNote={callNote}
+                videoStripSlot={videoStripSlot}
+                onSendMessage={tableBroadcast.sendChatMessage}
+                onClose={() => {
+                  setSeenMessageCount(tableBroadcast.messages.length);
+                  setIsChatOpen(false);
+                }}
+              />
+            )}
+          </LiveKitTableCall>
+        ) : null}
+
         {/* Bottom-Center HUD Dock */}
         <div className="pointer-events-none fixed bottom-5 left-1/2 z-20 -translate-x-1/2">
           <RoomHudDock
             room={room}
-            tableId={presence.selfState.tableId}
+            tableId={activeTableId}
             isLeaving={isLeaving}
+            isMicOn={isMicOn}
+            isCamOn={isCamOn}
+            isCameraAvailable={cameraStatus === "active"}
+            isChatOpen={isChatOpen}
+            unreadChatCount={unreadChatCount}
+            callStatus={callStatus}
+            onToggleMic={() => setIsMicOn((prev) => !prev)}
+            onToggleCam={() => setIsCamOn((prev) => !prev)}
+            onToggleChat={() => {
+              setSeenMessageCount(tableBroadcast.messages.length);
+              setIsChatOpen((prev) => !prev);
+            }}
             onStandUp={handleStandUp}
             onLeaveRoom={() => void handleLeaveRoom()}
           />

@@ -52,28 +52,28 @@
 
 ## 4. Ordered Implementation Checklist
 
-- [ ] Download and vendor `@tensorflow-models/coco-ssd` weights and `@mediapipe/tasks-vision` WASM + `face_landmarker.task` into `public/models/` (verify zero external CDN requests during CV init).
-- [ ] Implement `src/lib/livekit.ts` and `POST /api/livekit/token` (`livekit-server-sdk`, server-only `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`, `roomName = "${roomSlug}:${tableId}"`, `401` if unauthenticated, `404` if unknown `roomSlug`, and **`403 FORBIDDEN`** if `room.allowAudioVideo === false`).
-- [ ] Implement `POST /api/sessions/[sessionId]/distractions` (`401`/`403`/`404` checks, inserts into `distraction_logs`, validates `reason` and `durationMs >= 0`).
-- [ ] Implement `src/lib/focus-grace.ts` (3000 ms continuous distraction threshold, immediate recovery on `FOCUSED`, break-phase exemption when `timerPhase === "break"`) and `src/lib/web-audio-alert.ts`.
-- [ ] Implement `src/hooks/useSharedMedia.ts` acquiring a single base `MediaStream` on room entry, cloning `baseVideoTrack.clone()` for LiveKit **only** when `allowAudioVideo === true` and seated, never calling `clone()` in General Study silent rooms (`allowAudioVideo === false`), stopping only the clone on `Stand Up`, and stopping all base tracks on room exit.
-- [ ] Implement `src/hooks/useFocusGuard.ts` loading models from `/models/*` (`Loading focus models locally...`), sampling the hidden `<video>` at 3–5 FPS (`250 ms` interval), and driving `focus-grace.ts` -> beep + auto-pause timer (`paused_distraction`) + `POST .../distractions` + `halo = "red"` Presence update in both Math and General Study rooms.
-- [ ] Build `src/hooks/useTableBroadcast.ts` (`timer:sync` + topic-room `chat:message` only), `LiveKitTableCall.tsx`, and `TableChatSheet.tsx` (`w-80` slide-over drawer with compact video tiles, plain-text `chat:message` capped at `1000` chars, unread counter on bottom dock), conditionally rendered **only** when `room.allowAudioVideo === true`.
-- [ ] Wire `FocusStatusPill.tsx`, `DistractionAlertBanner.tsx`, and permission-denied fallback (`Camera off · Manual timer mode` + `[Enable Camera]` retry) into `/campus/[roomSlug]`.
-- [ ] Write Vitest unit tests for `focus-grace.ts` (`< 3000 ms` transient glance ignored, `>= 3000 ms` triggers once, `break` exemption suppresses alert), `/api/livekit/token` (including **`403 FORBIDDEN`** on `general-quiet-hall` and `200 OK` on `math-calculus`), and `/api/sessions/[sessionId]/distractions`.
+- [x] Download and vendor `@tensorflow-models/coco-ssd` weights and `@mediapipe/tasks-vision` WASM + `face_landmarker.task` into `public/models/` (verify zero external CDN requests during CV init).
+- [x] Implement `src/lib/livekit.ts` and `POST /api/livekit/token` (`livekit-server-sdk`, server-only `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`, `roomName = "${roomSlug}:${tableId}"`, `401` if unauthenticated, `404` if unknown `roomSlug`, and **`403 FORBIDDEN`** if `room.allowAudioVideo === false`).
+- [x] Implement `POST /api/sessions/[sessionId]/distractions` (`401`/`403`/`404` checks, inserts into `distraction_logs`, validates `reason` and `durationMs >= 0`).
+- [x] Implement `src/lib/focus-grace.ts` (3000 ms continuous distraction threshold, immediate recovery on `FOCUSED`, break-phase exemption when `timerPhase === "break"`) and `src/lib/web-audio-alert.ts`.
+- [x] Implement `src/hooks/useSharedMedia.ts` acquiring a single base `MediaStream` on room entry, cloning `baseVideoTrack.clone()` for LiveKit **only** when `allowAudioVideo === true` and seated, never calling `clone()` in General Study silent rooms (`allowAudioVideo === false`), stopping only the clone on `Stand Up`, and stopping all base tracks on room exit.
+- [x] Implement `src/hooks/useFocusGuard.ts` loading models from `/models/*` (`Loading focus models locally...`), sampling the hidden `<video>` at 3–5 FPS (`250 ms` interval), and driving `focus-grace.ts` -> beep + auto-pause timer (`paused_distraction`) + `POST .../distractions` + `halo = "red"` Presence update in both Math and General Study rooms.
+- [x] Build `src/hooks/useTableBroadcast.ts` (`timer:sync` + topic-room `chat:message` only), `LiveKitTableCall.tsx`, and `TableChatSheet.tsx` (`w-80` slide-over drawer with compact video tiles, plain-text `chat:message` capped at `1000` chars, unread counter on bottom dock), conditionally rendered **only** when `room.allowAudioVideo === true`.
+- [x] Wire `FocusStatusPill.tsx`, `DistractionAlertBanner.tsx`, and permission-denied fallback (`Camera off · Manual timer mode` + `[Enable Camera]` retry) into `/campus/[roomSlug]`.
+- [x] Write Vitest unit tests for `focus-grace.ts` (`< 3000 ms` transient glance ignored, `>= 3000 ms` triggers once, `break` exemption suppresses alert), `/api/livekit/token` (including **`403 FORBIDDEN`** on `general-quiet-hall` and `200 OK` on `math-calculus`), and `/api/sessions/[sessionId]/distractions`.
 
 ---
 
 ## 5. Success Criteria (Pass / Fail)
 
-- [ ] Browser Network tab confirms zero model/WASM requests to external CDNs (`storage.googleapis.com`, `cdn.jsdelivr.net`, `tfhub.dev`) and zero webcam frames sent to Next.js/Gemini servers.
-- [ ] In **Math Topic rooms (`allowAudioVideo === true`)**: sitting at a table connects LiveKit using `baseVideoTrack.clone()`; clicking `Stand Up` disconnects LiveKit and stops the cloned track while the CV focus loop continues running uninterrupted.
-- [ ] In **General Study Silent rooms (`allowAudioVideo === false`)**: LiveKit and Table Chat UI/buttons are completely hidden, `baseVideoTrack.clone()` is never called, `POST /api/livekit/token` returns `403 FORBIDDEN`, and local webcam CV Focus Guard still runs normally.
-- [ ] Clicking `Leave Room` stops the base `MediaStream` tracks so the OS webcam indicator turns off completely.
-- [ ] Brief look-aways (`< 3s`) do not trigger alerts; holding a `cell phone` or looking away for `>= 3s` during a focus block plays the Web Audio beep, pauses the timer, sets `halo = "red"`, shows the top-center banner, and persists a `distraction_logs` row.
-- [ ] During a scheduled `break` (`halo = "yellow"`), holding a phone or leaving the desk does not trigger distraction alerts or log distractions.
-- [ ] Denying webcam permission leaves the 3D room, Topic A/V audio/chat, and manual study timers 100% functional with the `Camera off · Manual timer mode` pill.
-- [ ] Table chat renders all `chat:message` payloads as plain text (HTML/script strings escaped) and scopes messages strictly to `table:{roomSlug}:{tableId}` in Topic A/V rooms.
+- [x] Browser Network tab confirms zero model/WASM requests to external CDNs (`storage.googleapis.com`, `cdn.jsdelivr.net`, `tfhub.dev`) and zero webcam frames sent to Next.js/Gemini servers.
+- [x] In **Math Topic rooms (`allowAudioVideo === true`)**: sitting at a table connects LiveKit using `baseVideoTrack.clone()`; clicking `Stand Up` disconnects LiveKit and stops the cloned track while the CV focus loop continues running uninterrupted.
+- [x] In **General Study Silent rooms (`allowAudioVideo === false`)**: LiveKit and Table Chat UI/buttons are completely hidden, `baseVideoTrack.clone()` is never called, `POST /api/livekit/token` returns `403 FORBIDDEN`, and local webcam CV Focus Guard still runs normally.
+- [x] Clicking `Leave Room` stops the base `MediaStream` tracks so the OS webcam indicator turns off completely.
+- [x] Brief look-aways (`< 3s`) do not trigger alerts; holding a `cell phone` or looking away for `>= 3s` during a focus block plays the Web Audio beep, pauses the timer, sets `halo = "red"`, shows the top-center banner, and persists a `distraction_logs` row.
+- [x] During a scheduled `break` (`halo = "yellow"`), holding a phone or leaving the desk does not trigger distraction alerts or log distractions.
+- [x] Denying webcam permission leaves the 3D room, Topic A/V audio/chat, and manual study timers 100% functional with the `Camera off · Manual timer mode` pill.
+- [x] Table chat renders all `chat:message` payloads as plain text (HTML/script strings escaped) and scopes messages strictly to `table:{roomSlug}:{tableId}` in Topic A/V rooms.
 
 ---
 

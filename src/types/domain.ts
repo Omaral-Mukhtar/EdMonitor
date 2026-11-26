@@ -29,6 +29,23 @@ export interface TimerSyncPayload {
   remainingMs: number;
 }
 
+export interface TableChatMessage {
+  id: string;
+  authorId: string;
+  displayName: string;
+  avatarColor: string;
+  text: string;
+  sentAt: string;
+}
+
+export interface DistractionLogRecord {
+  id: string;
+  sessionId: string;
+  reason: DistractionReason;
+  durationMs: number;
+  triggeredAt: string;
+}
+
 export interface StudySessionRecord {
   id: string;
   userId: string;

@@ -18,7 +18,7 @@ import type {
 
 const MOVE_THROTTLE_MS = 250; // <= 4 Hz
 
-interface TrackedRoomPresencePayload extends RoomPresenceState {
+export interface TrackedRoomPresencePayload extends Partial<RoomPresenceState> {
   clientId?: string;
 }
 
@@ -51,31 +51,114 @@ function createClientInstanceId(): string {
   return `client-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function flattenRemoteMembers(
+/**
+ * Builds a Supabase Realtime Presence key WITHOUT colons (`:`), because Supabase
+ * Realtime Presence silently drops remote presence sync diffs when keys contain `:`.
+ */
+export function buildRoomPresenceKey(userId: string, clientId: string): string {
+  const safeUser = userId.replaceAll(":", "_");
+  const safeClient = clientId.replaceAll(":", "_");
+  return `${safeUser}_${safeClient}`;
+}
+
+function normalizePosition(pos: unknown): [number, number, number] {
+  if (
+    Array.isArray(pos) &&
+    pos.length >= 3 &&
+    typeof pos[0] === "number" &&
+    typeof pos[1] === "number" &&
+    typeof pos[2] === "number"
+  ) {
+    return [pos[0], pos[1], pos[2]];
+  }
+  return [0, 0, 4.6];
+}
+
+function normalizeHalo(halo: unknown): FocusHalo {
+  return halo === "red" || halo === "yellow" || halo === "green"
+    ? halo
+    : "green";
+}
+
+function normalizeTechnique(technique: unknown): StudyTechnique {
+  return technique === "pomodoro" ||
+    technique === "deep_work" ||
+    technique === "feynman" ||
+    technique === "flowtime"
+    ? technique
+    : "pomodoro";
+}
+
+function normalizeTimerPhase(phase: unknown): TimerPhase {
+  return phase === "focus" ||
+    phase === "break" ||
+    phase === "paused" ||
+    phase === "idle"
+    ? phase
+    : "idle";
+}
+
+/**
+ * Parses `channel.presenceState()` metas into `RoomPresenceState[]`, applying safe
+ * defaults for any missing optional fields so remote peers are never silently dropped.
+ */
+export function parseRemoteRoomPresenceMembers(
   presenceState: Record<string, TrackedRoomPresencePayload[]>,
-  selfClientId: string
+  selfClientId: string,
+  selfUserId?: string
 ): RoomPresenceState[] {
   const remotes: RoomPresenceState[] = [];
-  for (const entries of Object.values(presenceState)) {
+  for (const [presenceKey, entries] of Object.entries(presenceState)) {
+    if (!Array.isArray(entries)) {
+      continue;
+    }
     for (const entry of entries) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
       if (entry.clientId && entry.clientId === selfClientId) {
         continue;
       }
+      if (
+        !entry.clientId &&
+        selfUserId &&
+        entry.userId === selfUserId
+      ) {
+        continue;
+      }
+
+      const resolvedUserId =
+        typeof entry.userId === "string" && entry.userId.length > 0
+          ? entry.userId
+          : presenceKey.split("_")[0] || presenceKey;
+
       remotes.push({
-        clientId: entry.clientId,
-        userId: entry.userId,
-        displayName: entry.displayName,
-        isGuest: entry.isGuest,
-        avatarColor: entry.avatarColor,
-        tableId: entry.tableId,
-        seatIndex: entry.seatIndex,
-        position: entry.position,
-        rotationY: entry.rotationY,
-        technique: entry.technique,
-        timerPhase: entry.timerPhase,
-        syncedWithTable: entry.syncedWithTable,
-        halo: entry.halo,
-        updatedAt: entry.updatedAt,
+        clientId:
+          typeof entry.clientId === "string" ? entry.clientId : presenceKey,
+        userId: resolvedUserId,
+        displayName:
+          typeof entry.displayName === "string" && entry.displayName.trim()
+            ? entry.displayName
+            : "Student",
+        isGuest: Boolean(entry.isGuest),
+        avatarColor:
+          typeof entry.avatarColor === "string" && entry.avatarColor
+            ? entry.avatarColor
+            : "#2563EB",
+        tableId: typeof entry.tableId === "string" ? entry.tableId : null,
+        seatIndex:
+          typeof entry.seatIndex === "number" ? entry.seatIndex : null,
+        position: normalizePosition(entry.position),
+        rotationY:
+          typeof entry.rotationY === "number" ? entry.rotationY : Math.PI,
+        technique: normalizeTechnique(entry.technique),
+        timerPhase: normalizeTimerPhase(entry.timerPhase),
+        syncedWithTable: Boolean(entry.syncedWithTable),
+        halo: normalizeHalo(entry.halo),
+        updatedAt:
+          typeof entry.updatedAt === "string"
+            ? entry.updatedAt
+            : new Date().toISOString(),
       });
     }
   }
@@ -122,6 +205,7 @@ export function useRoomPresence({
 
   const selfState: RoomPresenceState = useMemo(
     () => ({
+      clientId,
       userId,
       displayName,
       isGuest,
@@ -137,6 +221,7 @@ export function useRoomPresence({
       updatedAt: new Date().toISOString(),
     }),
     [
+      clientId,
       userId,
       displayName,
       isGuest,
@@ -217,8 +302,7 @@ export function useRoomPresence({
 
     let cancelled = false;
     const supabase = createClient();
-
-    const presenceKey = `${userId}:${clientId}`;
+    const presenceKey = buildRoomPresenceKey(userId, clientId);
 
     const roomChannel = supabase.channel(`room:${roomSlug}`, {
       config: {
@@ -243,13 +327,15 @@ export function useRoomPresence({
         return;
       }
       const state = roomChannel.presenceState<TrackedRoomPresencePayload>();
-      setRemoteMembers(flattenRemoteMembers(state, clientId));
+      setRemoteMembers(
+        parseRemoteRoomPresenceMembers(state, clientId, userId)
+      );
     };
 
     roomChannel
-      .on("presence", { event: "sync" }, () => {
-        syncRoomMembers();
-      })
+      .on("presence", { event: "sync" }, syncRoomMembers)
+      .on("presence", { event: "join" }, syncRoomMembers)
+      .on("presence", { event: "leave" }, syncRoomMembers)
       .subscribe(async (status) => {
         if (cancelled) {
           return;
@@ -279,7 +365,7 @@ export function useRoomPresence({
         const lobbyPayload: CampusLobbyPresenceState = {
           userId,
           roomSlug,
-          halo: latestPayloadRef.current.halo,
+          halo: normalizeHalo(latestPayloadRef.current.halo),
           updatedAt: new Date().toISOString(),
         };
         await lobbyChannel.track(lobbyPayload).catch(() => undefined);
@@ -413,13 +499,24 @@ export function useRoomPresence({
     [selfState, remoteMembers]
   );
 
-  return {
-    selfState,
-    remoteMembers,
-    members,
-    isConnected,
-    walkTo,
-    sitAtSeat,
-    standUp,
-  };
+  return useMemo(
+    () => ({
+      selfState,
+      remoteMembers,
+      members,
+      isConnected,
+      walkTo,
+      sitAtSeat,
+      standUp,
+    }),
+    [
+      selfState,
+      remoteMembers,
+      members,
+      isConnected,
+      walkTo,
+      sitAtSeat,
+      standUp,
+    ]
+  );
 }

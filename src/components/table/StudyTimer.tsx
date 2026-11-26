@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   CheckCircle2,
   Coffee,
@@ -35,7 +34,6 @@ import {
   tickTimer,
   type StudyTimerState,
 } from "@/lib/study-timer";
-import { createClient } from "@/lib/supabase/client";
 import type {
   CampusSubject,
   StudySessionCreateResponse,
@@ -53,6 +51,14 @@ interface StudyTimerProps {
   tableId: string | null;
   timerState: StudyTimerState;
   syncedWithTable: boolean;
+  distractionCount: number;
+  onResetDistractionCount?: () => void;
+  onActiveSessionChange?: (sessionId: string | null) => void;
+  onSendTimerSync?: (payload: TimerSyncPayload) => void;
+  registerTimerSyncListener?: (
+    listener: ((payload: TimerSyncPayload) => void) | null
+  ) => void;
+  registerResumeHandler?: (handler: (() => Promise<void>) | null) => void;
   onStateChange: React.Dispatch<React.SetStateAction<StudyTimerState>>;
   onSyncedWithTableChange: (synced: boolean) => void;
   registerFinishHandler?: (
@@ -114,6 +120,12 @@ export function StudyTimer({
   tableId,
   timerState,
   syncedWithTable,
+  distractionCount,
+  onResetDistractionCount,
+  onActiveSessionChange,
+  onSendTimerSync,
+  registerTimerSyncListener,
+  registerResumeHandler,
   onStateChange,
   onSyncedWithTableChange,
   registerFinishHandler,
@@ -124,19 +136,35 @@ export function StudyTimer({
 
   const activeSessionIdRef = useRef<string | null>(null);
   const sessionStartingRef = useRef(false);
-  const tableChannelRef = useRef<RealtimeChannel | null>(null);
-  const tableSubscribedRef = useRef(false);
   const lastTickAtRef = useRef<number>(0);
 
   const timerStateRef = useRef(timerState);
   const syncedRef = useRef(syncedWithTable);
   const tableIdRef = useRef(tableId);
+  const distractionCountRef = useRef(distractionCount);
+  const onSendTimerSyncRef = useRef(onSendTimerSync);
+  const onActiveSessionChangeRef = useRef(onActiveSessionChange);
 
   useEffect(() => {
     timerStateRef.current = timerState;
     syncedRef.current = syncedWithTable;
     tableIdRef.current = tableId;
-  }, [timerState, syncedWithTable, tableId]);
+    distractionCountRef.current = distractionCount;
+    onSendTimerSyncRef.current = onSendTimerSync;
+    onActiveSessionChangeRef.current = onActiveSessionChange;
+  }, [
+    timerState,
+    syncedWithTable,
+    tableId,
+    distractionCount,
+    onSendTimerSync,
+    onActiveSessionChange,
+  ]);
+
+  const setActiveSessionId = useCallback((sessionId: string | null) => {
+    activeSessionIdRef.current = sessionId;
+    onActiveSessionChangeRef.current?.(sessionId);
+  }, []);
 
   const ensureServerSession = useCallback(
     async (technique: StudyTechnique, synced: boolean) => {
@@ -160,7 +188,7 @@ export function StudyTimer({
           return null;
         }
         const json = (await res.json()) as StudySessionCreateResponse;
-        activeSessionIdRef.current = json.session.id;
+        setActiveSessionId(json.session.id);
         return json.session.id;
       } catch {
         return null;
@@ -168,7 +196,7 @@ export function StudyTimer({
         sessionStartingRef.current = false;
       }
     },
-    [roomSlug, subject]
+    [roomSlug, setActiveSessionId, subject]
   );
 
   const patchServerSession = useCallback(
@@ -183,7 +211,7 @@ export function StudyTimer({
         return null;
       }
       if (options.endSession) {
-        activeSessionIdRef.current = null;
+        setActiveSessionId(null);
       }
 
       const current = timerStateRef.current;
@@ -194,7 +222,7 @@ export function StudyTimer({
           keepalive: options.keepalive,
           body: JSON.stringify({
             focusedSeconds: options.focusedSeconds ?? current.focusedSeconds,
-            distractionCount: 0,
+            distractionCount: distractionCountRef.current,
             tableId: tableIdRef.current,
             technique: options.technique ?? current.technique,
             syncedWithTable: syncedRef.current,
@@ -209,31 +237,19 @@ export function StudyTimer({
         return null;
       }
     },
-    []
+    [setActiveSessionId]
   );
 
   const broadcastTimerState = useCallback(
     (nextState: StudyTimerState) => {
-      const channel = tableChannelRef.current;
-      if (
-        !channel ||
-        !tableSubscribedRef.current ||
-        !tableIdRef.current ||
-        !syncedRef.current
-      ) {
+      if (!tableIdRef.current || !syncedRef.current) {
         return;
       }
       const payload = buildTimerSyncPayload(userId, nextState);
       if (!payload) {
         return;
       }
-      void channel
-        .send({
-          type: "broadcast",
-          event: "timer:sync",
-          payload,
-        })
-        .catch(() => undefined);
+      onSendTimerSyncRef.current?.(payload);
     },
     [userId]
   );
@@ -261,52 +277,29 @@ export function StudyTimer({
     };
   }, [patchServerSession]);
 
+  // Register listener on the single consolidated `useTableBroadcast` channel
   useEffect(() => {
-    if (!tableId) {
-      tableChannelRef.current = null;
-      tableSubscribedRef.current = false;
+    if (!registerTimerSyncListener) {
       return;
     }
-
-    const supabase = createClient();
-    const channel = supabase.channel(`table:${roomSlug}:${tableId}`, {
-      config: {
-        broadcast: {
-          self: false,
-          ack: false,
-        },
-      },
-    });
-    tableChannelRef.current = channel;
-
-    channel
-      .on(
-        "broadcast",
-        { event: "timer:sync" },
-        ({ payload }: { payload: TimerSyncPayload }) => {
-          if (!syncedRef.current || !payload) {
-            return;
-          }
-          onStateChange((prev) => {
-            const next = applyTableTimerSync(prev, payload);
-            if (next.visualState === "focus" && !activeSessionIdRef.current) {
-              void ensureServerSession(next.technique, true);
-            }
-            return next;
-          });
-          setStatusMessage("Synced with table timer");
+    const listener = (payload: TimerSyncPayload) => {
+      if (!syncedRef.current || !payload) {
+        return;
+      }
+      onStateChange((prev) => {
+        const next = applyTableTimerSync(prev, payload);
+        if (next.visualState === "focus" && !activeSessionIdRef.current) {
+          void ensureServerSession(next.technique, true);
         }
-      )
-      .subscribe((status) => {
-        tableSubscribedRef.current = status === "SUBSCRIBED";
+        return next;
       });
-
-    return () => {
-      tableSubscribedRef.current = false;
-      tableChannelRef.current = null;
-      void supabase.removeChannel(channel);
+      setStatusMessage("Synced with table timer");
     };
-  }, [ensureServerSession, onStateChange, roomSlug, tableId]);
+    registerTimerSyncListener(listener);
+    return () => {
+      registerTimerSyncListener(null);
+    };
+  }, [ensureServerSession, onStateChange, registerTimerSyncListener]);
 
   useEffect(() => {
     const isRunning =
@@ -334,6 +327,7 @@ export function StudyTimer({
           focusedSeconds: result.state.focusedSeconds,
           technique: result.state.technique,
         }).then((saved) => {
+          onResetDistractionCount?.();
           if (saved) {
             setStatusMessage(
               `Saved block · ${saved.session.focusScorePct ?? 100}% focus`
@@ -349,6 +343,7 @@ export function StudyTimer({
     };
   }, [
     broadcastTimerState,
+    onResetDistractionCount,
     onStateChange,
     patchServerSession,
     timerState.visualState,
@@ -362,20 +357,31 @@ export function StudyTimer({
     if (activeSessionIdRef.current && timerState.focusedSeconds > 0) {
       void patchServerSession({ endSession: true });
     } else {
-      activeSessionIdRef.current = null;
+      setActiveSessionId(null);
     }
+    onResetDistractionCount?.();
     const next = selectTimerTechnique(timerState, nextTechnique);
     onStateChange(next);
     setStatusMessage(null);
   };
 
-  const handleStartOrResume = async () => {
-    const next = startFocusBlock(timerState);
+  const handleStartOrResume = useCallback(async () => {
+    const next = startFocusBlock(timerStateRef.current);
     onStateChange(next);
     setStatusMessage(null);
-    await ensureServerSession(next.technique, syncedWithTable);
+    await ensureServerSession(next.technique, syncedRef.current);
     broadcastTimerState(next);
-  };
+  }, [broadcastTimerState, ensureServerSession, onStateChange]);
+
+  useEffect(() => {
+    if (!registerResumeHandler) {
+      return;
+    }
+    registerResumeHandler(handleStartOrResume);
+    return () => {
+      registerResumeHandler(null);
+    };
+  }, [handleStartOrResume, registerResumeHandler]);
 
   const handlePause = () => {
     const next = pauseFocusManual(timerState);
@@ -418,6 +424,7 @@ export function StudyTimer({
           });
         }
       }
+      onResetDistractionCount?.();
       if (result) {
         setStatusMessage(
           `Saved · ${result.streak.currentStreakDays}d streak`
@@ -435,7 +442,8 @@ export function StudyTimer({
       void handleFinishBlock();
       return;
     }
-    activeSessionIdRef.current = null;
+    setActiveSessionId(null);
+    onResetDistractionCount?.();
     onStateChange(resetTimer(timerState));
     setStatusMessage(null);
   };
