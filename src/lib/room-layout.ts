@@ -33,28 +33,30 @@ export const SEAT_LOCAL_OFFSETS: readonly SeatLocalOffset[] = [
   {
     seatIndex: 0,
     label: "North",
-    localPosition: [0, 0, -1.22],
+    localPosition: [0, 0, -1.26],
     rotationY: 0,
   },
   {
     seatIndex: 1,
     label: "East",
-    localPosition: [1.58, 0, 0],
+    localPosition: [1.62, 0, 0],
     rotationY: -Math.PI / 2,
   },
   {
     seatIndex: 2,
     label: "South",
-    localPosition: [0, 0, 1.22],
+    localPosition: [0, 0, 1.26],
     rotationY: Math.PI,
   },
   {
     seatIndex: 3,
     label: "West",
-    localPosition: [-1.58, 0, 0],
+    localPosition: [-1.62, 0, 0],
     rotationY: Math.PI / 2,
   },
 ] as const;
+
+export const SEATED_FORWARD_OFFSET = 0.08;
 
 export function clampFloorPosition(
   x: number,
@@ -75,11 +77,16 @@ export function getSeatWorldTransform(
     return null;
   }
 
+  // Step slightly forward along the chair's facing vector (+Z rotated by rotationY)
+  // so the seated torso rests cleanly on the cushion in front of the backrest.
+  const forwardX = Math.sin(seat.rotationY) * SEATED_FORWARD_OFFSET;
+  const forwardZ = Math.cos(seat.rotationY) * SEATED_FORWARD_OFFSET;
+
   return {
     position: [
-      Number((table.position[0] + seat.localPosition[0]).toFixed(3)),
+      Number((table.position[0] + seat.localPosition[0] + forwardX).toFixed(3)),
       0,
-      Number((table.position[2] + seat.localPosition[2]).toFixed(3)),
+      Number((table.position[2] + seat.localPosition[2] + forwardZ).toFixed(3)),
     ],
     rotationY: seat.rotationY,
   };

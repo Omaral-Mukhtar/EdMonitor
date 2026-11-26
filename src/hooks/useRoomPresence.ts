@@ -62,6 +62,7 @@ function flattenRemoteMembers(
         continue;
       }
       remotes.push({
+        clientId: entry.clientId,
         userId: entry.userId,
         displayName: entry.displayName,
         isGuest: entry.isGuest,
@@ -131,7 +132,7 @@ export function useRoomPresence({
       rotationY: locomotion.rotationY,
       technique,
       timerPhase,
-      syncedWithTable,
+      syncedWithTable: Boolean(locomotion.tableId) && syncedWithTable,
       halo,
       updatedAt: new Date().toISOString(),
     }),
@@ -217,10 +218,12 @@ export function useRoomPresence({
     let cancelled = false;
     const supabase = createClient();
 
+    const presenceKey = `${userId}:${clientId}`;
+
     const roomChannel = supabase.channel(`room:${roomSlug}`, {
       config: {
         presence: {
-          key: userId,
+          key: presenceKey,
         },
       },
     });
@@ -229,7 +232,7 @@ export function useRoomPresence({
     const lobbyChannel = supabase.channel("campus:lobby", {
       config: {
         presence: {
-          key: userId,
+          key: presenceKey,
         },
       },
     });

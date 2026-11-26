@@ -98,7 +98,7 @@ export function TopicRoomCard({
           size="sm"
           variant={room.allowAudioVideo ? "default" : "outline"}
           nativeButton={false}
-          render={<Link href={`/campus/${room.slug}`} prefetch={false} />}
+          render={<Link href={`/campus/${room.slug}`} />}
           className={cn(
             "h-7 gap-1 px-2.5 text-xs",
             room.allowAudioVideo

@@ -46,26 +46,26 @@
 
 ## 4. Ordered Implementation Checklist
 
-- [ ] Implement `src/lib/study-timer.ts` pure helpers: technique definitions (`pomodoro` 25/5, `deep_work` 50/10, `feynman` count-up, `flowtime` count-up), `focus_score_pct` formula, and UTC daily streak increment/reset logic.
-- [ ] Implement `POST /api/sessions` and `PATCH /api/sessions/[sessionId]` (`401` unauthenticated, `403` non-owner, `404` missing session/room, `400` invalid `subject` — accepting `"math" | "general"` via `campus-rooms.ts`, `endSession: true` computing `focusScorePct` and updating `profiles.current_streak_days` & `last_study_date`).
-- [ ] Implement `src/hooks/useRoomPresence.ts` for `room:{roomSlug}` Presence (`RoomPresenceState`, `<= 4 Hz` throttled move updates, discrete state updates) and synced `campus:lobby` room occupancy reporting.
-- [ ] Build `ProceduralRoomMesh.tsx` & `StudyTableCluster.tsx`: open-cutaway architectural room (two low walls + matte light-slate floor with subtle grid lines), 3 rounded-edge wooden/drafting study tables with 4 minimalist chairs each, seat occupancy indicators, and zone props (**Math**: geometric prism & coordinate frame; **General Study**: minimalist desk lamp & bookstand — zero Physics/Chemistry props, zero `.glb`/`.gltf` files).
-- [ ] Build `ProceduralAvatar.tsx`: stylized pawn/meeple (`CapsuleGeometry` torso tinted with `avatarColor`, matte `SphereGeometry` head with dark visor/eye dots for facing direction, small floating pill hands), sine-wave vertical bob when walking, lowered Y-position + slight forward lean when seated, `<Html distanceFactor={10}>` status pill, and 3-state floor halo torus mesh (`green`/`red`/`yellow`).
-- [ ] Build `StudyRoomScene.tsx` wrapping R3F `<Canvas camera={{ fov: 40 }} frameloop={isTabHidden ? "never" : "always"}>` with elevated 3/4 isometric-style diorama camera, constrained `OrbitControls` (preventing floor/wall clipping), warm hemisphere + directional key light + `<ContactShadows>`, `visibilitychange` listener, and cleanup/disposal on room exit.
-- [ ] Build `StudyTimer.tsx` (`top-4 right-4 w-72`) with technique selector, Start/Pause/Reset/Break controls, `JetBrains Mono` `tabular-nums`, and `"Sync timer with table"` (`timer:sync` Broadcast on `table:{roomSlug}:{tableId}` when seated).
-- [ ] Build `RoomHudDock.tsx` (`bottom-5`, `Stand Up` / `Leave Room`) and top-left Room + Mode badge (`Topic · A/V` vs `Silent · No A/V`) + Table badge + first-visitor empty-room toast.
-- [ ] Write Vitest unit tests for timer transitions, `focus_score_pct` + streak math, and `/api/sessions` auth/ownership/subject validation (`math` & `general`).
+- [x] Implement `src/lib/study-timer.ts` pure helpers: technique definitions (`pomodoro` 25/5, `deep_work` 50/10, `feynman` count-up, `flowtime` count-up), `focus_score_pct` formula, and UTC daily streak increment/reset logic.
+- [x] Implement `POST /api/sessions` and `PATCH /api/sessions/[sessionId]` (`401` unauthenticated, `403` non-owner, `404` missing session/room, `400` invalid `subject` — accepting `"math" | "general"` via `campus-rooms.ts`, `endSession: true` computing `focusScorePct` and updating `profiles.current_streak_days` & `last_study_date`).
+- [x] Implement `src/hooks/useRoomPresence.ts` for `room:{roomSlug}` Presence (`RoomPresenceState`, `<= 4 Hz` throttled move updates, discrete state updates) and synced `campus:lobby` room occupancy reporting.
+- [x] Build `ProceduralRoomMesh.tsx` & `StudyTableCluster.tsx`: open-cutaway architectural room (two low walls + matte light-slate floor with subtle grid lines), 3 rounded-edge wooden/drafting study tables with 4 minimalist chairs each, seat occupancy indicators, and zone props (**Math**: geometric prism & coordinate frame; **General Study**: minimalist desk lamp & bookstand — zero Physics/Chemistry props, zero `.glb`/`.gltf` files).
+- [x] Build `ProceduralAvatar.tsx`: stylized pawn/meeple (`CapsuleGeometry` torso tinted with `avatarColor`, matte `SphereGeometry` head with dark visor/eye dots for facing direction, small floating pill hands), sine-wave vertical bob when walking, lowered Y-position + slight forward lean when seated, `<Html distanceFactor={10}>` status pill, and 3-state floor halo torus mesh (`green`/`red`/`yellow`).
+- [x] Build `StudyRoomScene.tsx` wrapping R3F `<Canvas camera={{ fov: 40 }} frameloop={isTabHidden ? "never" : "always"}>` with elevated 3/4 isometric-style diorama camera, constrained `OrbitControls` (preventing floor/wall clipping), warm hemisphere + directional key light + `<ContactShadows>`, `visibilitychange` listener, and cleanup/disposal on room exit.
+- [x] Build `StudyTimer.tsx` (`top-4 right-4 w-72`) with technique selector, Start/Pause/Reset/Break controls, `JetBrains Mono` `tabular-nums`, and `"Sync timer with table"` (`timer:sync` Broadcast on `table:{roomSlug}:{tableId}` when seated).
+- [x] Build `RoomHudDock.tsx` (`bottom-5`, `Stand Up` / `Leave Room`) and top-left Room + Mode badge (`Topic · A/V` vs `Silent · No A/V`) + Table badge + first-visitor empty-room toast.
+- [x] Write Vitest unit tests for timer transitions, `focus_score_pct` + streak math, and `/api/sessions` auth/ownership/subject validation (`math` & `general`).
 
 ---
 
 ## 5. Success Criteria (Pass / Fail)
 
-- [ ] Entering `/campus/math-calculus` or `/campus/general-quiet-hall` mounts the open-cutaway procedural 3D diorama room (`fov: 38–42°`, constrained `OrbitControls`, `<ContactShadows>`, 3 drafting tables × 4 seats, zone-specific procedural prop) with zero `.glb`/`.gltf` network requests.
-- [ ] Clicking the floor walks the pawn/meeple avatar with sine-wave bobbing motion and clear visor-facing direction; clicking an open table seat seats the avatar (lowered Y + slight forward lean) and updates `tableId` + `seatIndex` in `room:{roomSlug}` Presence across two browser tabs.
-- [ ] Switching techniques (`Pomodoro`, `Deep Work`, `Feynman`, `Flowtime`) or entering a break (`yellow` halo) updates both the avatar's floating HUD pill and floor halo mesh immediately.
-- [ ] Enabling `"Sync timer with table"` broadcasts `timer:sync` to seated tablemates who also have sync enabled, while leaving unsynced peers unaffected.
-- [ ] Completing or leaving a study block in both `math` and `general` rooms calls `PATCH /api/sessions/[sessionId]` (`endSession: true`), persists `focusedSeconds` and `focusScorePct`, updates `currentStreakDays`, and shows up in Sprint 2's Progress Sheet under `Math` / `General Study`.
-- [ ] Leaving `/campus/[roomSlug]` back to `/campus` unmounts `<Canvas>`, removes Presence, and leaves `/campus` counts accurate.
+- [x] Entering `/campus/math-calculus` or `/campus/general-quiet-hall` mounts the open-cutaway procedural 3D diorama room (`fov: 38–42°`, constrained `OrbitControls`, `<ContactShadows>`, 3 drafting tables × 4 seats, zone-specific procedural prop) with zero `.glb`/`.gltf` network requests.
+- [x] Clicking the floor walks the pawn/meeple avatar with sine-wave bobbing motion and clear visor-facing direction; clicking an open table seat seats the avatar (lowered Y + slight forward lean) and updates `tableId` + `seatIndex` in `room:{roomSlug}` Presence across two browser tabs.
+- [x] Switching techniques (`Pomodoro`, `Deep Work`, `Feynman`, `Flowtime`) or entering a break (`yellow` halo) updates both the avatar's floating HUD pill and floor halo mesh immediately.
+- [x] Enabling `"Sync timer with table"` broadcasts `timer:sync` to seated tablemates who also have sync enabled, while leaving unsynced peers unaffected.
+- [x] Completing or leaving a study block in both `math` and `general` rooms calls `PATCH /api/sessions/[sessionId]` (`endSession: true`), persists `focusedSeconds` and `focusScorePct`, updates `currentStreakDays`, and shows up in Sprint 2's Progress Sheet under `Math` / `General Study`.
+- [x] Leaving `/campus/[roomSlug]` back to `/campus` unmounts `<Canvas>`, removes Presence, and leaves `/campus` counts accurate.
 
 ---
 
