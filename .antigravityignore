@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs & caches
+.next/
+out/
+dist/
+build/
+.vercel/
+.turbo/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# Self-hosted CV models, WASM & large binary/media assets
+public/models/
+*.wasm
+*.tflite
+*.bin
+*.onnx
+*.pb
+*.glb
+*.gltf
+*.fbx
+*.obj
+*.mp4
+*.webm
+*.mov
+*.zip
+*.tar.gz
+
+# Lockfiles, logs & OS files
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+*.log
+.DS_Store
+Thumbs.db
