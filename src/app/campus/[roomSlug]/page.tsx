@@ -21,5 +21,5 @@ export default async function StudyRoomPage({
     notFound();
   }
 
-  return <StudyRoomClient room={room} profile={profile} />;
+  return <StudyRoomClient key={room.slug} room={room} profile={profile} />;
 }

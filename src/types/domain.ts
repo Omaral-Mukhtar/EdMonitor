@@ -91,6 +91,7 @@ export interface UserProfile {
 
 export interface RoomPresenceState {
   clientId?: string;
+  roomSlug?: string;
   userId: string;
   displayName: string;
   isGuest: boolean;

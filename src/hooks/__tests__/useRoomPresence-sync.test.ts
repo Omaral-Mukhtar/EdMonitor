@@ -74,4 +74,43 @@ describe("useRoomPresence multi-account sync & key safety", () => {
     ).length;
     expect(table1Seated).toBe(2);
   });
+
+  it("filters out peers whose roomSlug does not strictly match the active roomSlug", () => {
+    const presenceState = {
+      user_math_cid_1: [
+        {
+          clientId: "cid-math",
+          roomSlug: "math-calculus",
+          userId: "user-math",
+          displayName: "Math Peer",
+        },
+      ],
+      user_missing_cid_2: [
+        {
+          clientId: "cid-missing",
+          userId: "user-missing",
+          displayName: "Legacy Peer",
+        },
+      ],
+      user_quiet_cid_3: [
+        {
+          clientId: "cid-quiet",
+          roomSlug: "general-quiet-hall",
+          userId: "user-quiet",
+          displayName: "Quiet Peer",
+        },
+      ],
+    };
+
+    const remotes = parseRemoteRoomPresenceMembers(
+      presenceState,
+      "cid-self",
+      "user-self",
+      "general-quiet-hall"
+    );
+
+    expect(remotes).toHaveLength(1);
+    expect(remotes[0].userId).toBe("user-quiet");
+    expect(remotes[0].roomSlug).toBe("general-quiet-hall");
+  });
 });

@@ -105,7 +105,8 @@ function normalizeTimerPhase(phase: unknown): TimerPhase {
 export function parseRemoteRoomPresenceMembers(
   presenceState: Record<string, TrackedRoomPresencePayload[]>,
   selfClientId: string,
-  selfUserId?: string
+  selfUserId?: string,
+  expectedRoomSlug?: string
 ): RoomPresenceState[] {
   const remotes: RoomPresenceState[] = [];
   for (const [presenceKey, entries] of Object.entries(presenceState)) {
@@ -126,6 +127,9 @@ export function parseRemoteRoomPresenceMembers(
       ) {
         continue;
       }
+      if (expectedRoomSlug && entry.roomSlug !== expectedRoomSlug) {
+        continue;
+      }
 
       const resolvedUserId =
         typeof entry.userId === "string" && entry.userId.length > 0
@@ -135,6 +139,10 @@ export function parseRemoteRoomPresenceMembers(
       remotes.push({
         clientId:
           typeof entry.clientId === "string" ? entry.clientId : presenceKey,
+        roomSlug:
+          typeof entry.roomSlug === "string"
+            ? entry.roomSlug
+            : expectedRoomSlug,
         userId: resolvedUserId,
         displayName:
           typeof entry.displayName === "string" && entry.displayName.trim()
@@ -193,8 +201,19 @@ export function useRoomPresence({
     rotationY: Math.PI,
   }));
 
-  const [remoteMembers, setRemoteMembers] = useState<RoomPresenceState[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
+  const [remoteStore, setRemoteStore] = useState<{
+    roomSlug: string;
+    members: RoomPresenceState[];
+  }>({ roomSlug: "", members: [] });
+  const [connectedRoomSlug, setConnectedRoomSlug] = useState<string | null>(
+    null
+  );
+
+  const remoteMembers = useMemo(
+    () => (remoteStore.roomSlug === roomSlug ? remoteStore.members : []),
+    [remoteStore, roomSlug]
+  );
+  const isConnected = connectedRoomSlug === roomSlug;
 
   const roomChannelRef = useRef<RealtimeChannel | null>(null);
   const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
@@ -206,6 +225,7 @@ export function useRoomPresence({
   const selfState: RoomPresenceState = useMemo(
     () => ({
       clientId,
+      roomSlug,
       userId,
       displayName,
       isGuest,
@@ -222,6 +242,7 @@ export function useRoomPresence({
     }),
     [
       clientId,
+      roomSlug,
       userId,
       displayName,
       isGuest,
@@ -303,8 +324,21 @@ export function useRoomPresence({
     let cancelled = false;
     const supabase = createClient();
     const presenceKey = buildRoomPresenceKey(userId, clientId);
+    const roomTopic = `room:${roomSlug}`;
+    const lobbyTopic = "campus:lobby";
 
-    const roomChannel = supabase.channel(`room:${roomSlug}`, {
+    // Remove any lingering channels for these topics before subscribing
+    // (prevents React Strict Mode double-mount from reusing an already-subscribed channel)
+    for (const existing of supabase.getChannels()) {
+      if (
+        existing.topic === `realtime:${roomTopic}` ||
+        existing.topic === `realtime:${lobbyTopic}`
+      ) {
+        void supabase.removeChannel(existing);
+      }
+    }
+
+    const roomChannel = supabase.channel(roomTopic, {
       config: {
         presence: {
           key: presenceKey,
@@ -313,7 +347,7 @@ export function useRoomPresence({
     });
     roomChannelRef.current = roomChannel;
 
-    const lobbyChannel = supabase.channel("campus:lobby", {
+    const lobbyChannel = supabase.channel(lobbyTopic, {
       config: {
         presence: {
           key: presenceKey,
@@ -327,9 +361,15 @@ export function useRoomPresence({
         return;
       }
       const state = roomChannel.presenceState<TrackedRoomPresencePayload>();
-      setRemoteMembers(
-        parseRemoteRoomPresenceMembers(state, clientId, userId)
-      );
+      setRemoteStore({
+        roomSlug,
+        members: parseRemoteRoomPresenceMembers(
+          state,
+          clientId,
+          userId,
+          roomSlug
+        ),
+      });
     };
 
     roomChannel
@@ -342,17 +382,20 @@ export function useRoomPresence({
         }
         if (status === "SUBSCRIBED") {
           roomSubscribedRef.current = true;
-          setIsConnected(true);
+          setConnectedRoomSlug(roomSlug);
           await roomChannel
             .track({
               ...latestPayloadRef.current,
+              roomSlug,
               updatedAt: new Date().toISOString(),
             })
             .catch(() => undefined);
-          syncRoomMembers();
+          if (!cancelled) {
+            syncRoomMembers();
+          }
         } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
           roomSubscribedRef.current = false;
-          setIsConnected(false);
+          setConnectedRoomSlug((prev) => (prev === roomSlug ? null : prev));
         }
       });
 
@@ -382,8 +425,12 @@ export function useRoomPresence({
         clearTimeout(throttleTimeoutRef.current);
         throttleTimeoutRef.current = null;
       }
-      void roomChannel.untrack().catch(() => undefined);
-      void lobbyChannel.untrack().catch(() => undefined);
+      if (roomSubscribedRef.current) {
+        void roomChannel.untrack().catch(() => undefined);
+      }
+      if (lobbySubscribedRef.current) {
+        void lobbyChannel.untrack().catch(() => undefined);
+      }
       void supabase.removeChannel(roomChannel);
       void supabase.removeChannel(lobbyChannel);
       roomChannelRef.current = null;

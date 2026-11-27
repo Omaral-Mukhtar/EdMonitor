@@ -21,6 +21,7 @@ import {
 } from "@/components/table/LiveKitTableCall";
 import { StudyTimer } from "@/components/table/StudyTimer";
 import { TableChatSheet } from "@/components/table/TableChatSheet";
+import { WhiteboardOverlay } from "@/components/whiteboard/WhiteboardOverlay";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useFocusGuard } from "@/hooks/useFocusGuard";
@@ -66,6 +67,7 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
 
   const [toastDismissed, setToastDismissed] = useState(false);
   const [roomMenuOpen, setRoomMenuOpen] = useState(false);
+  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
 
   // Topic A/V table call & chat state (strictly unused in General Study silent rooms)
@@ -323,6 +325,7 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
           accentHex={accentHex}
           selfState={presence.selfState}
           remoteMembers={presence.remoteMembers}
+          isOverlayOpen={isWhiteboardOpen}
           htmlPortal={htmlPortalRef}
           onFloorClick={handleFloorWalk}
           onSelectSeat={handleSelectSeat}
@@ -578,6 +581,7 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
             isCamOn={isCamOn}
             isCameraAvailable={cameraStatus === "active"}
             isChatOpen={isChatOpen}
+            isWhiteboardOpen={isWhiteboardOpen}
             unreadChatCount={unreadChatCount}
             callStatus={callStatus}
             onToggleMic={() => setIsMicOn((prev) => !prev)}
@@ -586,11 +590,22 @@ export function StudyRoomClient({ room, profile }: StudyRoomClientProps) {
               setSeenMessageCount(tableBroadcast.messages.length);
               setIsChatOpen((prev) => !prev);
             }}
+            onToggleWhiteboard={() => setIsWhiteboardOpen((prev) => !prev)}
             onStandUp={handleStandUp}
             onLeaveRoom={() => void handleLeaveRoom()}
           />
         </div>
       </div>
+
+      {/* Solo Whiteboard & Math AI Overlay (pauses R3F frameloop="never", strictly local state) */}
+      {!isLeaving ? (
+        <WhiteboardOverlay
+          open={isWhiteboardOpen}
+          room={room}
+          tableId={activeTableId}
+          onClose={() => setIsWhiteboardOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

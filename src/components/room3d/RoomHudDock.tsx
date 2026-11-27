@@ -6,6 +6,7 @@ import {
   MessageSquare,
   Mic,
   MicOff,
+  PenTool,
   Video,
   VideoOff,
   VolumeX,
@@ -24,11 +25,13 @@ interface RoomHudDockProps {
   isCamOn: boolean;
   isCameraAvailable: boolean;
   isChatOpen: boolean;
+  isWhiteboardOpen?: boolean;
   unreadChatCount: number;
   callStatus?: LiveKitCallStatus;
   onToggleMic: () => void;
   onToggleCam: () => void;
   onToggleChat: () => void;
+  onToggleWhiteboard?: () => void;
   onStandUp: () => void;
   onLeaveRoom: () => void;
 }
@@ -41,11 +44,13 @@ export function RoomHudDock({
   isCamOn,
   isCameraAvailable,
   isChatOpen,
+  isWhiteboardOpen = false,
   unreadChatCount,
   callStatus = "idle",
   onToggleMic,
   onToggleCam,
   onToggleChat,
+  onToggleWhiteboard,
   onStandUp,
   onLeaveRoom,
 }: RoomHudDockProps) {
@@ -194,6 +199,25 @@ export function RoomHudDock({
         </>
       )}
 
+      <Button
+        type="button"
+        size="sm"
+        variant={isWhiteboardOpen ? "secondary" : "outline"}
+        disabled={isLeaving}
+        onClick={onToggleWhiteboard}
+        aria-pressed={isWhiteboardOpen}
+        data-testid="dock-whiteboard-button"
+        className={cn(
+          "h-8 gap-1.5 rounded-full px-3 text-xs",
+          isWhiteboardOpen
+            ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+            : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100"
+        )}
+      >
+        <PenTool className="size-3.5" />
+        <span>My Whiteboard &amp; AI</span>
+      </Button>
+
       {isSeated ? (
         <Button
           type="button"
@@ -207,7 +231,7 @@ export function RoomHudDock({
           <span>Stand Up</span>
         </Button>
       ) : (
-        <span className="px-2 text-xs text-slate-500">
+        <span className="hidden whitespace-nowrap px-2 text-xs text-slate-500 sm:inline">
           Click a chair to sit
         </span>
       )}

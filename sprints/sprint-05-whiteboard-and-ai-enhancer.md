@@ -55,27 +55,27 @@
 
 ## 4. Ordered Implementation Checklist
 
-- [ ] Install `isomorphic-dompurify`, `@google/genai`, and `mathjs`.
-- [ ] Implement `src/lib/ai/sanitizeSvg.ts` using `isomorphic-dompurify` on **both** the server (`sanitizeSvgServer(svg)`) and the client (`sanitizeSvgClient(svg)`) with strict `USE_PROFILES: { svg: true, svgFilters: false }`, `FORBID_TAGS: ["script", "foreignObject", "iframe", "object", "embed", "style"]`, and `FORBID_ATTR` (blocking `on*` handlers and `javascript:` / external `href` / `xlink:href` URLs)—never use a custom regex SVG sanitizer.
-- [ ] Implement `src/lib/ai/math-syllabus.ts` with typed `MathSyllabusTopic` definitions containing `allowedFormulas`, `forbiddenMethods`, and `requiredStepOrder`: 1 real complete starter entry for `math2-area-between-curves`, plus `TODO` placeholder entries for remaining Math topics.
-- [ ] Implement `src/lib/ai/math-eval.ts` (AST-validated, strictly allowlisted `mathjs` evaluator blocking `import`, `eval`, assignments, strings, matrices, and unknown symbols) and `src/lib/ai/math-plotter.ts` rendering `MathPlotSpec` onto `1200 × 800` SVG with `y = f(x)` & `x = g(y)` curves, asymptote/domain path breaks, intersection dots/labels, `shadedRegions[]` (for crossing curves), and `dx`/`dy` representative slices.
-- [ ] Implement `src/lib/ai/prompts.ts` matching `AI_PROMPTS.md` (Math-only persona, syllabus injection, `1200x800` SVG rules, `enhance` & `generate` prompts, `whiteboardAiResponseSchema` with `plotSpec`).
-- [ ] Implement `POST /api/ai/whiteboard` with auth check (`401`), Math-only + payload size/Zod validation (`400`/`413`), per-user rate limit (`429`), 25s `AbortController` timeout (`504`), 1 retry on `429`/`503`, `responseSchema` call to `process.env.GEMINI_MODEL`, and server-side `sanitizeSvgServer`.
-- [ ] Implement `src/lib/whiteboard-coords.ts` mapping pointer events on any viewport size to/from the `1200 × 800` virtual coordinate space.
-- [ ] Build `WhiteboardCanvas.tsx` (local-only strokes/undo/clear + auto-dim opacity when an AI plot is active with toggle), `SvgOverlayLayer.tsx` (`viewBox="0 0 1200 800"` combining deterministic `MathPlotSpec` SVG + `sanitizeSvgClient`), `AiEnhancerPanel.tsx`, and `WhiteboardOverlay.tsx` (`z-40 fixed inset-3`, strictly local state—zero `whiteboard:*` Broadcast calls).
-- [ ] Connect `isWhiteboardOpen` in `StudyRoomScene.tsx` so `<Canvas frameloop={is3DPaused ? "never" : "always"}>` pauses 3D rendering while keeping CV and (in Topic A/V rooms) LiveKit active.
-- [ ] Write Vitest tests for `sanitizeSvg.ts` XSS vectors, `math-eval.ts` allowlist security + `math-plotter.ts` (`y_of_x`, `x_of_y`, asymptote breaks, crossing `shadedRegions[]`, `dx`/`dy` slices), `whiteboard-coords.ts`, and `POST /api/ai/whiteboard`.
+- [x] Install `isomorphic-dompurify`, `@google/genai`, and `mathjs`.
+- [x] Implement `src/lib/ai/sanitizeSvg.ts` using `isomorphic-dompurify` on **both** the server (`sanitizeSvgServer(svg)`) and the client (`sanitizeSvgClient(svg)`) with strict `USE_PROFILES: { svg: true, svgFilters: false }`, `FORBID_TAGS: ["script", "foreignObject", "iframe", "object", "embed", "style"]`, and `FORBID_ATTR` (blocking `on*` handlers and `javascript:` / external `href` / `xlink:href` URLs)—never use a custom regex SVG sanitizer.
+- [x] Implement `src/lib/ai/math-syllabus.ts` with typed `MathSyllabusTopic` definitions containing `allowedFormulas`, `forbiddenMethods`, and `requiredStepOrder`: 1 real complete starter entry for `math2-area-between-curves`, plus `TODO` placeholder entries for remaining Math topics.
+- [x] Implement `src/lib/ai/math-eval.ts` (AST-validated, strictly allowlisted `mathjs` evaluator blocking `import`, `eval`, assignments, strings, matrices, and unknown symbols) and `src/lib/ai/math-plotter.ts` rendering `MathPlotSpec` onto `1200 × 800` SVG with `y = f(x)` & `x = g(y)` curves, asymptote/domain path breaks, intersection dots/labels, `shadedRegions[]` (for crossing curves), and `dx`/`dy` representative slices.
+- [x] Implement `src/lib/ai/prompts.ts` matching `AI_PROMPTS.md` (Math-only persona, syllabus injection, `1200x800` SVG rules, `enhance` & `generate` prompts, `whiteboardAiResponseSchema` with `plotSpec`).
+- [x] Implement `POST /api/ai/whiteboard` with auth check (`401`), Math-only + payload size/Zod validation (`400`/`413`), per-user rate limit (`429`), 25s `AbortController` timeout (`504`), 1 retry on `429`/`503`, `responseSchema` call to `process.env.GEMINI_MODEL`, and server-side `sanitizeSvgServer`.
+- [x] Implement `src/lib/whiteboard-coords.ts` mapping pointer events on any viewport size to/from the `1200 × 800` virtual coordinate space.
+- [x] Build `WhiteboardCanvas.tsx` (local-only strokes/undo/clear + auto-dim opacity when an AI plot is active with toggle), `SvgOverlayLayer.tsx` (`viewBox="0 0 1200 800"` combining deterministic `MathPlotSpec` SVG + `sanitizeSvgClient`), `AiEnhancerPanel.tsx`, and `WhiteboardOverlay.tsx` (`z-40 fixed inset-3`, strictly local state—zero `whiteboard:*` Broadcast calls).
+- [x] Connect `isWhiteboardOpen` in `StudyRoomScene.tsx` so `<Canvas frameloop={is3DPaused ? "never" : "always"}>` pauses 3D rendering while keeping CV and (in Topic A/V rooms) LiveKit active.
+- [x] Write Vitest tests for `sanitizeSvg.ts` XSS vectors, `math-eval.ts` allowlist security + `math-plotter.ts` (`y_of_x`, `x_of_y`, asymptote breaks, crossing `shadedRegions[]`, `dx`/`dy` slices), `whiteboard-coords.ts`, and `POST /api/ai/whiteboard`.
 
 ---
 
 ## 5. Success Criteria (Pass / Fail)
 
-- [ ] Opening the solo whiteboard sets R3F `<Canvas frameloop="never">` (zero 3D render ticks / GPU draw calls while open) and restores `frameloop="always"` on close without losing WebGL context or peer Presence positions.
-- [ ] All whiteboard drawing, undo/clear, AI responses, and step navigation remain strictly solo (local browser state) — WebSocket inspection confirms zero `whiteboard:*` Broadcast frames on `table:{roomSlug}:{tableId}`.
-- [ ] `POST /api/ai/whiteboard` enforces `subject === "math"` (`400` otherwise), injects `math-syllabus.ts` rules into Gemini (`GEMINI_MODEL=gemini-3.8-flash`), and returns sanitized SVG + optional `plotSpec`.
-- [ ] `math-plotter.ts` deterministically renders `y = f(x)`, `x = g(y)`, asymptote breaks (e.g., `1/x`), intersections, crossing-curve `shadedRegions[]`, and `dx`/`dy` slices on the `1200 × 800` SVG layer, while auto-dimming the student's freehand canvas (with working toggle).
-- [ ] Allowlisted `mathjs` evaluator rejects unsafe expressions (e.g., `import`, `eval`, assignment) and both server-side and client-side `isomorphic-dompurify` strip `<script>`, `<foreignObject>`, `onload=`, `onclick=`, and `javascript:` URLs.
-- [ ] All unit/integration tests, `npx tsc --noEmit`, `npm run lint`, and `npm run build` pass.
+- [x] Opening the solo whiteboard sets R3F `<Canvas frameloop="never">` (zero 3D render ticks / GPU draw calls while open) and restores `frameloop="always"` on close without losing WebGL context or peer Presence positions.
+- [x] All whiteboard drawing, undo/clear, AI responses, and step navigation remain strictly solo (local browser state) — WebSocket inspection confirms zero `whiteboard:*` Broadcast frames on `table:{roomSlug}:{tableId}`.
+- [x] `POST /api/ai/whiteboard` enforces `subject === "math"` (`400` otherwise), injects `math-syllabus.ts` rules into Gemini (`GEMINI_MODEL=gemini-3.8-flash`), and returns sanitized SVG + optional `plotSpec`.
+- [x] `math-plotter.ts` deterministically renders `y = f(x)`, `x = g(y)`, asymptote breaks (e.g., `1/x`), intersections, crossing-curve `shadedRegions[]`, and `dx`/`dy` slices on the `1200 × 800` SVG layer, while auto-dimming the student's freehand canvas (with working toggle).
+- [x] Allowlisted `mathjs` evaluator rejects unsafe expressions (e.g., `import`, `eval`, assignment) and both server-side and client-side `isomorphic-dompurify` strip `<script>`, `<foreignObject>`, `onload=`, `onclick=`, and `javascript:` URLs.
+- [x] All unit/integration tests, `npx tsc --noEmit`, `npm run lint`, and `npm run build` pass.
 
 ---
 
